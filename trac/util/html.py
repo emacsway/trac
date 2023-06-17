@@ -21,6 +21,7 @@
 import io
 import re
 import sys
+from collections import OrderedDict
 from html import entities
 from html.parser import HTMLParser
 
@@ -685,7 +686,7 @@ class TracHTMLSanitizer(object):
                     if not self.is_safe_elem(tag, attrs):
                         waiting_for = tag
                         continue
-                    new_attrs = self.sanitize_attrs(tag, dict(attrs))
+                    new_attrs = self.sanitize_attrs(tag, OrderedDict(attrs))
                     yield kind, (tag, Attrs(iter(new_attrs.items()))), pos
 
                 elif kind is END:
@@ -777,7 +778,7 @@ class TracHTMLSanitizer(object):
         :rtype: dict
 
         """
-        new_attrs = {}
+        new_attrs = OrderedDict()
         for attr, value in attrs.items():
             if value is None:
                 value = attr
@@ -1032,9 +1033,9 @@ class HTMLSanitization(HTMLTransform):
             self.waiting_for = tag
             return
 
-        new_attrs = self.sanitizer.sanitize_attrs(tag, dict(attrs))
+        new_attrs = self.sanitizer.sanitize_attrs(tag, OrderedDict(attrs))
         html_attrs = ''.join(' %s="%s"' % (name, escape(new_attrs[name]))
-                             for name in sorted(new_attrs))
+                             for name in new_attrs)
         self._write('<%s%s%s>' % (tag, html_attrs, startend))
 
     def handle_starttag(self, tag, attrs):

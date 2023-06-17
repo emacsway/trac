@@ -25,8 +25,8 @@ from trac.core import TracError
 from trac.test import makeSuite
 from trac.util import html
 from trac.util.html import (
-    Element, FormTokenInjector, Fragment, Markup, TracHTMLSanitizer,
-    escape, find_element, html_attribute, is_safe_origin, plaintext, tag,
+    Element, FormTokenInjector, Fragment, HTML, Markup, TracHTMLSanitizer,
+    escape, find_element, genshi, html_attribute, is_safe_origin, plaintext, tag,
     to_fragment, xml
 )
 from trac.util.translation import gettext, tgettext
@@ -302,15 +302,15 @@ class TracHTMLSanitizerTestCaseBase(unittest.TestCase):
 
         test('<img src="data:image/png,...."/>',
              '<img src="data:image/png,...."/>')
-        test('<img crossorigin="anonymous" src="http://example.org/login"/>',
+        test('<img src="http://example.org/login" crossorigin="anonymous"/>',
              '<img src="http://example.org/login"/>')
-        test('<img crossorigin="anonymous" src="http://example.org/login"/>',
-             '<img crossorigin="use-credentials"'
-             ' src="http://example.org/login"/>')
+        test('<img src="http://example.org/login" crossorigin="anonymous"/>',
+             '<img src="http://example.org/login"'
+             ' crossorigin="use-credentials"/>')
         test('<img src="http://example.net/bar.png"/>',
              '<img src="http://example.net/bar.png"/>')
-        test('<img crossorigin="anonymous"'
-             ' src="http://example.net:443/qux.png"/>',
+        test('<img src="http://example.net:443/qux.png"'
+             ' crossorigin="anonymous"/>',
              '<img src="http://example.net:443/qux.png"/>')
         test('<img src="/path/foo.png"/>', '<img src="/path/foo.png"/>')
         test('<img src="../../bar.png"/>', '<img src="../../bar.png"/>')
@@ -394,6 +394,21 @@ class TracHTMLSanitizerTestCase(TracHTMLSanitizerTestCaseBase):
              '<p>&amp;&lt;&gt;&quot;&apos;</p>')
         test("<p>&amp;&lt;&gt;&#34;'</p>",
              '<p>&#38;&#60;&#62;&#34;&#39;</p>')
+
+
+if genshi:
+    class TracHTMLSanitizerLegacyGenshiTestCase(TracHTMLSanitizerTestCaseBase):
+        def sanitize(self, html):
+            sanitizer = TracHTMLSanitizer(safe_schemes=self.safe_schemes,
+                                          safe_origins=self.safe_origins)
+            return str(HTML(html, encoding='utf-8') | sanitizer)
+
+        def test_special_characters_data_genshi(self):
+            test = self._assert_sanitize
+            test('''<p>&amp;&lt;&gt;"'</p>''',
+                 '<p>&amp;&lt;&gt;&quot;&apos;</p>')
+            test('''<p>&amp;&lt;&gt;"'</p>''',
+                 '<p>&#38;&#60;&#62;&#34;&#39;</p>')
 
 
 class FindElementTestCase(unittest.TestCase):
@@ -641,6 +656,8 @@ def test_suite():
     suite.addTest(makeSuite(ElementTestCase))
     suite.addTest(makeSuite(FormTokenInjectorTestCase))
     suite.addTest(makeSuite(TracHTMLSanitizerTestCase))
+    if genshi:
+        suite.addTest(unittest.makeSuite(TracHTMLSanitizerLegacyGenshiTestCase))
     suite.addTest(makeSuite(FindElementTestCase))
     suite.addTest(makeSuite(IsSafeOriginTestCase))
     suite.addTest(makeSuite(PlaintextTestCase))
