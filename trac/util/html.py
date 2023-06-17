@@ -30,6 +30,31 @@ try:
 except ImportError:
     from markupsafe import soft_unicode
 
+"""Utilities for producing HTML content.
+
+Imports related to the legacy Genshi template engine should all go
+through this module:
+
+    from trac.util.html import genshi, Stream
+
+If Genshi is not installed, `genshi` and all related symbols will be
+`None`.
+
+"""
+
+try:
+    import genshi
+    import genshi.input
+    from genshi.core import Attrs, QName, Stream, COMMENT, START, END, TEXT
+    from genshi.input import ParseError
+    def stream_to_unicode(stream):
+        return Markup(stream.render('xhtml', encoding=None,
+                                    strip_whitespace=False))
+except ImportError:
+    genshi = stream_to_unicode = None
+    HTML = COMMENT = START = END = TEXT = Attrs = QName = Stream = None
+    ParseError = None
+
 try:
     from babel.support import LazyProxy
 except ImportError:
@@ -354,9 +379,13 @@ class Fragment(object):
         return self
 
     def append(self, arg):
+        global genshi
         if arg: # ignore most false values (None, False, [], (), ''), except 0!
             if isinstance(arg, (Fragment, str, bytes, int, float)):
                 self.children.append(arg)
+            elif genshi and isinstance(arg, Stream):
+                # legacy support for Genshi streams
+                self.children.append(stream_to_unicode(arg))
             else:
                 # support iterators and generators
                 try:
@@ -370,6 +399,14 @@ class Fragment(object):
     def as_text(self):
         return ''.join(c.as_text() if isinstance(c, Fragment) else str(c)
                         for c in self.children)
+
+    if genshi:
+        def __iter__(self):
+            """Genshi compatibility layer.
+
+            :deprecated: this will be removed in Trac 1.5.1.
+            """
+            yield TEXT, Markup(self), (None, -1, -1)
 
 
 class XMLElement(Fragment):
@@ -490,6 +527,9 @@ class TracHTMLSanitizer(object):
 
     The usual way to use the sanitizer is to call the `sanitize`
     method on some potentially unsafe HTML content.
+
+    Note that for backward compatibility, the TracHTMLSanitizer still
+    behaves as a Genshi filter.
 
     See also `genshi.HTMLSanitizer`_ from which the TracHTMLSanitizer
     has evolved.
@@ -626,6 +666,40 @@ class TracHTMLSanitizer(object):
         transform.close()
         return Markup(transform.out.getvalue())
 
+    if genshi:
+        def __call__(self, stream):
+            """Apply the filter to the given stream.
+
+            :deprecated: the ability to behave as a Genshi filter will be
+                         removed in Trac 1.5.1.
+
+            :param stream: the markup event stream to filter
+            """
+            waiting_for = None
+
+            for kind, data, pos in stream:
+                if kind is START:
+                    if waiting_for:
+                        continue
+                    tag, attrs = data
+                    if not self.is_safe_elem(tag, attrs):
+                        waiting_for = tag
+                        continue
+                    new_attrs = self.sanitize_attrs(tag, dict(attrs))
+                    yield kind, (tag, Attrs(iter(new_attrs.items()))), pos
+
+                elif kind is END:
+                    tag = data
+                    if waiting_for:
+                        if waiting_for == tag:
+                            waiting_for = None
+                    else:
+                        yield kind, data, pos
+
+                elif kind is not COMMENT:
+                    if not waiting_for:
+                        yield kind, data, pos
+
     def is_safe_css(self, prop, value):
         """Determine whether the given css property declaration is to be
         considered safe for inclusion in the output.
@@ -655,8 +729,17 @@ class TracHTMLSanitizer(object):
         """
         if tag not in self.safe_tags:
             return False
-        if tag == 'input' and ('type', 'password') in attrs:
-            return False
+        if hasattr(tag, 'localname'): # in Genshi QName
+            tag = tag.localname
+        if tag == 'input':
+            # TODO (1.5.1) no more Attrs
+            if Attrs and isinstance(attrs, Attrs):
+                input_type = attrs.get('type', '').lower()
+                if input_type == 'password':
+                    return False
+            else:
+                if ('type', 'password') in attrs:
+                    return False
         return True
 
     def is_safe_uri(self, uri):
@@ -714,6 +797,8 @@ class TracHTMLSanitizer(object):
         if tag == 'img' and 'src' in new_attrs and \
                 not self._is_safe_origin(new_attrs['src']):
             attr = 'crossorigin'
+            if QName and isinstance(tag, QName):
+                attr = QName(attr)
             new_attrs[attr] = 'anonymous'
         return new_attrs
 
@@ -862,6 +947,12 @@ class HTMLTransform(HTMLParser):
     def handle_startendtag(self, tag, attrs):
         self._write(self.get_starttag_text())
 
+    def handle_charref(self, name):
+        self._handle_charref(name)
+
+    def handle_entityref(self, name):
+        self._handle_entityref(name)
+
     def handle_comment(self, data):
         self._write('<!--%s-->' % data)
 
@@ -876,6 +967,31 @@ class HTMLTransform(HTMLParser):
 
     def handle_endtag(self, tag):
         self._write('</' + tag + '>')
+
+    def unescape(self, s):
+        return _html_parser_unescape(s)
+
+    _codepoint2ref = {38: '&amp;', 60: '&lt;', 62: '&gt;', 34: '&#34;'}
+
+    def _handle_charref(self, name):
+        if name.startswith(('x', 'X')):
+            codepoint = int(name[1:], 16)
+        else:
+            codepoint = int(name)
+        if 0 <= codepoint <= 0x10ffff:
+            text = self._codepoint2ref.get(codepoint) or _unichr(codepoint)
+        else:
+            text = '&amp;#%s;' % name
+        self._write(text)
+
+    def _handle_entityref(self, name):
+        try:
+            codepoint = _name2codepoint[name]
+        except KeyError:
+            text = '&amp;%s;' % name
+        else:
+            text = self._codepoint2ref.get(codepoint) or _unichr(codepoint)
+        self._write(text)
 
     def _write(self, data):
         self.out.write(self._convert(data))
@@ -928,6 +1044,14 @@ class HTMLSanitization(HTMLTransform):
     def handle_startendtag(self, tag, attrs):
         if not self.waiting_for:
             self._handle_start(tag, attrs, '/')
+
+    def handle_charref(self, name):
+        if not self.waiting_for:
+            self._handle_charref(name)
+
+    def handle_entityref(self, name):
+        if not self.waiting_for:
+            self._handle_entityref(name)
 
     def handle_comment(self, data):
         pass
@@ -1058,3 +1182,117 @@ def valid_html_bytes(data):
 
     """
     return data.translate(None, _invalid_control_chars)
+
+
+if sys.maxunicode > 0xffff:
+    _unichr = chr
+else:
+    def _unichr(codepoint):  # narrow Python build
+        try:
+            return chr(codepoint)
+        except ValueError:
+            if not (0 <= codepoint <= 0x10ffff):
+                raise
+            s = r'\U%08x' % codepoint
+            try:
+                return s.decode('unicode-escape')
+            except Exception as e:
+                raise ValueError(e)
+
+
+_reference_re = re.compile(r'&(?:#[xX][0-9a-fA-F]+|#[0-9]+|\w{1,8});')
+
+def _html_parser_unescape(s):
+    """This is to avoid an issue which HTMLParser.unescape() raises
+    ValueError or OverflowError from unichr() when character reference
+    with a large integer in the attribute.
+    """
+
+    def repl(match):
+        match = match.group(0)
+        name = match[1:-1]
+        if name.startswith(('#x', '#X')):
+            codepoint = int(name[2:], 16)
+        elif name.startswith('#'):
+            codepoint = int(name[1:])
+        else:
+            try:
+                codepoint = _name2codepoint[name]
+            except KeyError:
+                return match
+        if 0 <= codepoint <= 0x10ffff:
+            return _unichr(codepoint)
+        else:
+            return match
+
+    return _reference_re.sub(repl, s)
+
+
+if genshi:
+    class GenshiHTMLParserFixup(genshi.input.HTMLParser):
+
+        def handle_starttag(self, tag, attrib):
+            fixed_attrib = [(QName(name), name if value is None else value)
+                            for name, value in attrib]
+            self._enqueue(START, (QName(tag), Attrs(fixed_attrib)))
+            if tag in self._EMPTY_ELEMS:
+                self._enqueue(END, QName(tag))
+            else:
+                self._open_tags.append(tag)
+
+        def handle_charref(self, name):
+            if name.startswith(('x', 'X')):
+                codepoint = int(name[1:], 16)
+            else:
+                codepoint = int(name)
+            if 0 <= codepoint <= 0x10ffff:
+                text = _unichr(codepoint)
+            else:
+                text = '&#%s;' % name
+            self._enqueue(TEXT, text)
+
+        def handle_entityref(self, name):
+            text = None
+            try:
+                codepoint = _name2codepoint[name]
+            except KeyError:
+                pass
+            else:
+                if 0 <= codepoint <= 0x10ffff:
+                    text = _unichr(codepoint)
+            self._enqueue(TEXT, text or '&%s;' % name)
+
+        def unescape(self, s):
+            return _html_parser_unescape(s)
+
+
+    def HTML(text, encoding=None):
+        if isinstance(text, str):
+            f = io.StringIO(text)
+            encoding = None
+        else:
+            f = io.BytesIO(text)
+        parser = GenshiHTMLParserFixup(f, encoding=encoding)
+        return Stream(list(parser))
+
+
+    def expand_markup(stream, ctxt=None):
+        """A Genshi stream filter for expanding `genshi.Markup` events.
+
+        :deprecated: will be removed in Trac 1.5.1.
+
+        Note: Expansion may not be possible if the fragment is badly
+        formed, or partial.
+
+        """
+        for event in stream:
+            if isinstance(event[1], Markup):
+                try:
+                    for subevent in HTML(event[1]):
+                        yield subevent
+                except ParseError:
+                    yield event
+            else:
+                yield event
+else:
+    expand_markup = None
