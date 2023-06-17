@@ -1728,7 +1728,7 @@ class Chrome(Component):
         def _load_genshi_template(self, filename, method=None):
             if not self.templates:
                 genshi_dirs = [
-                    pkg_resources.resource_filename('tracbackport', 'templates/genshi')
+                    pkg_resources.resource_filename('trac', 'templates/genshi')
                 ] + self.get_all_templates_dirs()
                 self.templates = TemplateLoader(
                     genshi_dirs,
