@@ -476,7 +476,7 @@ class RequestDispatcher(Component):
         elif len(args) == 2:
             resp += (metadata, None)
         elif len(args) == 0:
-            resp = (None,) * 3
+            resp = (None,) * 4
         elif len(args) == 4:
             metadata = resp[2]
             method = resp[3]
@@ -496,6 +496,8 @@ class RequestDispatcher(Component):
                 # is forwarded when not accepted by the IRequestFilter.
                 method = resp[-1]
                 resp = f.post_process_request(req, *resp[:-1])
+                if len(resp) == 2:
+                    resp += (metadata,)
                 resp += (method,)
             elif nbargs == 0:
                 f.post_process_request(req, *(None,) * extra_arg_count)

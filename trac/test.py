@@ -33,6 +33,8 @@ import time
 import types
 import unittest
 
+os.environ["LANG"] = "en_US.UTF-8"
+
 try:
     from babel import Locale
 except ImportError:
