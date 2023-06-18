@@ -1148,12 +1148,12 @@ class ChromeTemplateRenderingTestCase(unittest.TestCase):
                 <body>
                 <ul>
                 <li></li>
-                <li><span title="Jul 1, 2007, 12:34:56 PM">[0-9]+ years ago</span></li>
-                <li><span title="Jul 1, 2007, 12:34:56 PM">[0-9]+ years ago</span></li>
+                <li><span title="Jul 1, 2007, 12:34:56\u202fPM">[0-9]+ years ago</span></li>
+                <li><span title="Jul 1, 2007, 12:34:56\u202fPM">[0-9]+ years ago</span></li>
                 <li><span title="[0-9]+ years ago">on Jul 1, 2007</span></li>
-                <li><span title="[0-9]+ years ago">on Jul 1, 2007 at 12:34:56 PM</span></li>
+                <li><span title="[0-9]+ years ago">on Jul 1, 2007 at 12:34:56\u202fPM</span></li>
                 <li><span title="[0-9]+ years ago">Jul 1, 2007</span></li>
-                <li><span title="[0-9]+ years ago">Jul 1, 2007, 12:34:56 PM</span></li>
+                <li><span title="[0-9]+ years ago">Jul 1, 2007, 12:34:56\u202fPM</span></li>
                 </ul>
                 </body>
                 </html>"""), content)
@@ -1269,7 +1269,7 @@ class ChromeTemplateStreamFilterTestCase(unittest.TestCase):
               <body>Bláh
                 <h1>Tickét #13196</h1>
               </body>
-            </html>"""), content)
+            </html>"""), content.decode('utf-8'))
 
     def test_filter_stream_xml(self):
         """Regression test for #13196"""
@@ -1302,7 +1302,7 @@ class ChromeTemplateStreamFilterTestCase(unittest.TestCase):
                 <language>en-US</language>
                 <generator>Trac</generator>
               </channel>
-            </rss>"""), content)
+            </rss>"""), content.decode('utf-8'))
 
     def test_filter_stream_text(self):
         filename = 'test_chrome.txt'
@@ -1317,7 +1317,7 @@ class ChromeTemplateStreamFilterTestCase(unittest.TestCase):
         self.assertIsInstance(content, bytes)
         self.assertEqual(textwrap.dedent("""\
             <title>Tickét #13196</title>
-            <link>http://example.org/?x=1&y=2</link>"""), content)
+            <link>http://example.org/?x=1&y=2</link>"""), content.decode('utf-8'))
 
     def _render_template(self, filename, data, content_type):
         req = MockRequest(self.env)
